@@ -3,16 +3,17 @@ import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
 import fire
 
-DATA_PATH = Path(__file__).parent.parent.parent / "data" / "creditcard.csv"
+DATA_PATH = Path(__file__).parent.parent.parent / "data" 
+RAW_FILE = DATA_PATH / "creditcard.csv"
 TARGET = "Class"
 
 
-def load_data(path=DATA_PATH):
+def load_data(path=RAW_FILE):
     df = pd.read_csv(path)
     return df
 
 
-def split_folds(in_path=DATA_PATH, out_dir=DATA_PATH.parent, n_splits=5):
+def split_folds(in_path=RAW_FILE, out_dir=DATA_PATH.parent, n_splits=5):
     # data
     out_dir = Path(out_dir)
     (out_dir / 'train').mkdir(parents=True, exist_ok=True)
