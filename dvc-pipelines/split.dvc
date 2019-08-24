@@ -1,8 +1,8 @@
-md5: d27bee595a229d0e19858869532d21d8
+md5: 51f484ce3b8a7df88551d82327903f41
 cmd: python src/fraud/preprocessing.py split_folds --out_dir data/splits
 wdir: ..
 deps:
-- md5: 943b005371e371868c9413530f3dd784
+- md5: b97cc879789f2ed4294f9d7b0d7a890b
   path: src/fraud/preprocessing.py
 - md5: e90efcb83d69faf99fcab8b0255024de
   path: data/creditcard.csv
