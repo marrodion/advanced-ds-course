@@ -74,15 +74,15 @@ def evaluate_and_save(est, data_path, out_path):
             metrics.to_json(out_path / "metrics.json", orient="columns")
     return metrics.to_dict()
 
+
 def train():
-    est = DummyClassifier(strategy="prior", random_state=SEED)
+    est = LogisticRegressionCV(
+        Cs=np.linspace(1e-3, 10, 10), cv=TimeSeriesSplit(n_splits=5), scoring='f1_weighted'
+    )
     data_path = preprocessing.RAW_FILE
     out_path = EXPERIMENTS_DIR
-    return evaluate_and_save(
-        est, data_path=data_path, out_path=out_path
-    )
+    return evaluate_and_save(est, data_path=data_path, out_path=out_path)
+
 
 if __name__ == "__main__":
-    fire.Fire({
-        'train': train
-    })
+    fire.Fire({"train": train})
