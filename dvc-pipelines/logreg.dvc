@@ -1,0 +1,19 @@
+md5: f51da08a579652c0c59bb9db08c0a6fd
+cmd: python src/fraud/model.py logreg --data_path data/creditcard.csv --out_path data/experiments
+wdir: ..
+deps:
+- md5: e90efcb83d69faf99fcab8b0255024de
+  path: data/creditcard.csv
+- md5: 782c2b39341c96ff5a699ec7bde081b1
+  path: src/fraud/model.py
+outs:
+- md5: 92a1ad0da3952bcf02ae05e197239a38
+  path: data/experiments/logreg-base/logreg-base.pkl
+  cache: true
+  metric: false
+  persist: false
+- md5: 0059863eede9b1c709ace916067d06f2
+  path: data/experiments/logreg-base/metrics.json
+  cache: false
+  metric: true
+  persist: false
