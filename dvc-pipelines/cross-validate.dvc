@@ -1,0 +1,19 @@
+md5: 152de1b50126ada65ce0edc1612cf60a
+cmd: python src/fraud/model.py train
+wdir: ..
+deps:
+- md5: e90efcb83d69faf99fcab8b0255024de
+  path: data/creditcard.csv
+- md5: 5c5fc882d93acd2eddedf9238dcc19bf
+  path: src/fraud/model.py
+outs:
+- md5: 10a9b9fea67f4fbb7d1ccfa6cee30461
+  path: data/experiments/estimators.pkl
+  cache: true
+  metric: false
+  persist: false
+- md5: 1f5304ee0419aa1dc18722413230560e
+  path: data/experiments/metrics.json
+  cache: false
+  metric: true
+  persist: false
