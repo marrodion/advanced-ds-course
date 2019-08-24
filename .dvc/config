@@ -1,0 +1,4 @@
+['remote "gs-origin"']
+url = gs://personal-ml-stuff/advanced-cource/dvc
+[core]
+remote = gs-origin
