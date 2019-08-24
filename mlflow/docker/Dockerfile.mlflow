@@ -1,0 +1,21 @@
+FROM python:3.7-slim
+
+RUN pip install mlflow google-cloud-storage
+COPY .secrets /mnt/secrets
+
+ENV PORT 5000
+ENV GCS_BUCKET personal-ml-stuff
+ENV GOOGLE_APPLICATION_CREDENTIALS=/mnt/secrets/sa-key.json
+COPY ./run-mlflow-server.sh /run-mlflow-server.sh
+
+CMD [
+    "mlflow",
+    "--backend-store-uri", 
+    "/mnt/mlflow-storage",
+    "--default-artifact-root",
+    "gs://${GCS_BUCKET}/advanced-cource/mlflow",
+    "--host",
+     "0.0.0.0",
+     "--port",
+     "${PORT}"
+]
