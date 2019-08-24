@@ -1,0 +1,14 @@
+md5: d27bee595a229d0e19858869532d21d8
+cmd: python src/fraud/preprocessing.py split_folds --out_dir data/splits
+wdir: ..
+deps:
+- md5: 943b005371e371868c9413530f3dd784
+  path: src/fraud/preprocessing.py
+- md5: e90efcb83d69faf99fcab8b0255024de
+  path: data/creditcard.csv
+outs:
+- md5: 73f01aa6fde7ac91e9d73a2b1347eb30.dir
+  path: data/splits
+  cache: true
+  metric: false
+  persist: false
