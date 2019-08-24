@@ -1,0 +1,21 @@
+md5: d6aeb1f31712a615d18f72cbd8d637af
+cmd: python src/fraud/model.py dummy_baseline --data_path data/creditcard.csv
+wdir: ..
+deps:
+- md5: e90efcb83d69faf99fcab8b0255024de
+  path: data/creditcard.csv
+- md5: 2c4ab89b7ea4c75c06edce348639536c
+  path: src/fraud/model.py
+- md5: b97cc879789f2ed4294f9d7b0d7a890b
+  path: src/fraud/preprocessing.py
+outs:
+- md5: 10a9b9fea67f4fbb7d1ccfa6cee30461
+  path: data/experiments/dummy-baseline/dummy-baseline.pkl
+  cache: true
+  metric: false
+  persist: false
+- md5: 2c9f8ad048011b5a525d3c2687c419f9
+  path: data/experiments/dummy-baseline/metrics.json
+  cache: false
+  metric: true
+  persist: false
