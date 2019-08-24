@@ -9,13 +9,16 @@ from pathlib import Path
 from sklearn.dummy import DummyClassifier
 from sklearn.exceptions import UndefinedMetricWarning
 from sklearn.model_selection import TimeSeriesSplit, cross_validate
+from sklearn.linear_model import LogisticRegressionCV
+import numpy as np
 
 from fraud import preprocessing
 
 SPLIT_PATH = preprocessing.DATA_PATH / "splits"
 METRICS = ["accuracy", "f1_weighted", "precision", "recall", "roc_auc"]
 SEED = 42
-warnings.filterwarnings(action="ignore", category=UndefinedMetricWarning)
+EXPERIMENTS_DIR = preprocessing.DATA_PATH / "experiments"
+warnings.filterwarnings(action="ignore")
 
 
 def cv_defined_folds(
@@ -58,19 +61,37 @@ def get_xy(df, target_column=preprocessing.TARGET):
     return x, y
 
 
-def dummy_baseline(data_path, out_path=preprocessing.DATA_PATH / "experiments"):
-    est = DummyClassifier(strategy="prior", random_state=SEED)
+def evaluate_and_save(est, name, data_path, out_path):
     cv_results = cv(est, METRICS, data_path=Path(data_path))
-    estimators = cv_results.pop('estimator', {})    
+    estimators = cv_results.pop("estimator", {})
     metrics = pd.DataFrame.from_dict(cv_results)
     if out_path:
-        out_path = Path(out_path) / 'dummy-baseline'
+        out_path = Path(out_path) / name
         out_path.mkdir(parents=True, exist_ok=True)
         if estimators:
-            joblib.dump(estimators, out_path / f"dummy-baseline.pkl")
+            joblib.dump(estimators, out_path / f"{name}.pkl")
         if metrics.values.any():
-            metrics.to_json(out_path / 'metrics.json', orient='columns')
-    return metrics.to_dict(orient='list')
+            metrics.to_json(out_path / "metrics.json", orient="columns")
+    return metrics.to_dict(orient="list")
+
+
+def dummy_baseline(data_path, out_path=EXPERIMENTS_DIR):
+    est = DummyClassifier(strategy="prior", random_state=SEED)
+    return evaluate_and_save(
+        est, "dummy-baseline", data_path=data_path, out_path=out_path
+    )
+
+
+def logreg(data_path, out_path=EXPERIMENTS_DIR):
+    est = LogisticRegressionCV(
+        Cs=np.linspace(0.01, 10, 10),
+        cv=TimeSeriesSplit(n_splits=5),
+        penalty="l2",
+        random_state=SEED,
+    )
+    return evaluate_and_save(
+        est, "logreg-base", data_path=data_path, out_path=out_path
+    )
 
 
 if __name__ == "__main__":
