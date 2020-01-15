@@ -1,5 +1,5 @@
 import torch
-import tqdm
+from tqdm import tqdm
 from PIL import Image
 import pandas as pd
 from pathlib import Path
@@ -31,6 +31,9 @@ class SignsDataset(torch.utils.data.Dataset):
         
         target['boxes'] = boxes
         target['labels'] = torch.tensor(cls, dtype=torch.int64).unsqueeze(1)
+        target['image_id'] = torch.tensor([idx])
+        target['area'] = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
+        target['iscrowd'] = torch.zeros((num_objs,), dtype=torch.int64)
         
         if self.transforms is not None:
             img = self.transforms(img)
@@ -43,13 +46,22 @@ def collate_func(batch):
     imgs = []
     bbox = []
     labels = []
+    ids = []
+    areas = []
+    iscrowds = []
     for b in batch:
         imgs.append(b[0])
         bbox.append(b[1]['boxes'])
-        labels.append(b[1]['labels'])
+        labels.append(b[1]['labels'])        
+        ids.append(b[1]['image_id'])
+        areas.append(b[1]['area'])
+        iscrowds.append(b[1]['iscrowd'])
     imgs = torch.stack(imgs, dim=0)
     target = dict(
         boxes=bbox,
-        labels=labels
+        labels=labels,
+        image_id=ids,
+        area=areas,
+        iscrowd=iscrowds
     )
     return imgs, target
