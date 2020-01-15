@@ -1,6 +1,7 @@
 import torch
 from pycocotools.cocoeval import COCOeval
 from pycocotools.coco import COCO
+from tqdm import tqdm
 
 def evaluate(model, data_loader, device):
     model.eval()
@@ -18,7 +19,7 @@ def convert_to_coco_api(ds):
     ann_id = 1
     dataset = dict(images=[], categories=[], annotations=[])
     categories = set()
-    for img_idx in range(len(ds)):
+    for img_idx in tqdm(range(len(ds)), total=len(ds)):
         img, targets = ds[img_idx]
         image_id = targets["image_id"].item()
         img_dict = {}
@@ -27,7 +28,8 @@ def convert_to_coco_api(ds):
         img_dict['width'] = img.shape[-1]
         dataset['images'].append(img_dict)
         bboxes = targets["boxes"]
-        bboxes[:, 2:] -= bboxes[:, :2]
+        if bboxes.nelement() != 0:
+            bboxes[:, 2:] -= bboxes[:, :2]
         bboxes = bboxes.tolist()
         labels = targets['labels'].tolist()
         areas = targets['area'].tolist()
@@ -35,8 +37,8 @@ def convert_to_coco_api(ds):
         num_objs = len(bboxes)
         for i in range(num_objs):
             ann = {}
-            ann['image_id'] = image_id
-            ann['bbox'] = bboxes[i]
+            ann['image_id'] = image_id            
+            ann['bbox'] = bboxes[i]            
             ann['category_id'] = labels[i]
             categories.add(labels[i])
             ann['area'] = areas[i]
