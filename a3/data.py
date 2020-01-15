@@ -19,6 +19,9 @@ INFO=dict(
 LICENSES=[dict(id=0, name="", url="")]
 
 
+
+
+
 class SignsDataset(torch.utils.data.Dataset):
     def __init__(self, img_root, ann_root, transforms):
         self.img_root = img_root        
@@ -43,11 +46,12 @@ class SignsDataset(torch.utils.data.Dataset):
         trg = self.target[f]
         cls = [self.cls2idx[c] for c in trg[:, 0]]
         boxes = torch.tensor(list(row for row in trg[:, 1:]), dtype=torch.float32)
+        num_objs = trg.shape[0]
         
         target['boxes'] = boxes
         target['labels'] = torch.tensor(cls, dtype=torch.int64).unsqueeze(1)
         target['image_id'] = torch.tensor([idx])
-        target['area'] = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
+        target['area'] = (trg[:, 4] - trg[:, 2]) * (trg[:, 3] - trg[:, 1])
         target['iscrowd'] = torch.zeros((num_objs,), dtype=torch.int64)
         
         if self.transforms is not None:
@@ -56,6 +60,7 @@ class SignsDataset(torch.utils.data.Dataset):
     
     def __len__(self):
         return len(self.imgs)
+
 
 def collate_func(batch):
     imgs = []
@@ -82,12 +87,22 @@ def collate_func(batch):
     return imgs, target
 
 
+def get_data_loader(ds, batch_size, shuffle=True):
+    return torch.utils.data.DataLoader(ds, 
+                batch_size=batch_size, 
+                collate_fn=collate_func, 
+                pin_memory=True,
+                shuffle=shuffle
+    )
+
+
 def copy_images(img_path, out_path):
     files = list(Path(img_path).rglob('*.jpg'))
     dest_base = Path(out_path)
     for f in tqdm(files):
         dest = dest_base / f"{f.parts[-2]}_{f.name}"
         shutil.copy(f, dest)
+
 
 def annotations_to_coco(ann_path, img_path, out):
     ann_path = Path(ann_path)
@@ -165,11 +180,8 @@ def annotations_to_coco(ann_path, img_path, out):
     with open(out, 'w+') as fh:
         json.dump(result, fh)
 
+def coco_collate_fn(batch):
+    return tuple(zip(*batch))
+
 if __name__ == 'main':
     annotations_to_coco('./data/annotations/train', './data/images/train', './data/coco_ds/train/annotations.json')
-
-
-
-
-
-
