@@ -1,5 +1,6 @@
 import copy
 import os
+from tqdm import tqdm
 from PIL import Image
 
 import torch
@@ -149,7 +150,7 @@ def convert_to_coco_api(ds):
     ann_id = 1
     dataset = {'images': [], 'categories': [], 'annotations': []}
     categories = set()
-    for img_idx in range(len(ds)):
+    for img_idx in tqdm(range(len(ds)), total=len(ds)):
         # find better way to get target
         # targets = ds.get_annotations(img_idx)
         img, targets = ds[img_idx]
@@ -160,7 +161,8 @@ def convert_to_coco_api(ds):
         img_dict['width'] = img.shape[-1]
         dataset['images'].append(img_dict)
         bboxes = targets["boxes"]
-        bboxes[:, 2:] -= bboxes[:, :2]
+        if bboxes.nelement() != 0:
+            bboxes[:, 2:] -= bboxes[:, :2]
         bboxes = bboxes.tolist()
         labels = targets['labels'].tolist()
         areas = targets['area'].tolist()
@@ -177,7 +179,7 @@ def convert_to_coco_api(ds):
             ann = {}
             ann['image_id'] = image_id
             ann['bbox'] = bboxes[i]
-            ann['category_id'] = labels[i]
+            ann['category_id'] = labels[i]            
             categories.add(labels[i])
             ann['area'] = areas[i]
             ann['iscrowd'] = iscrowd[i]
@@ -204,49 +206,3 @@ def get_coco_api_from_dataset(dataset):
     if isinstance(dataset, torchvision.datasets.CocoDetection):
         return dataset.coco
     return convert_to_coco_api(dataset)
-
-
-class CocoDetection(torchvision.datasets.CocoDetection):
-    def __init__(self, img_folder, ann_file, transforms):
-        super(CocoDetection, self).__init__(img_folder, ann_file)
-        self._transforms = transforms
-
-    def __getitem__(self, idx):
-        img, target = super(CocoDetection, self).__getitem__(idx)
-        image_id = self.ids[idx]
-        target = dict(image_id=image_id, annotations=target)
-        if self._transforms is not None:
-            img, target = self._transforms(img, target)
-        return img, target
-
-
-def get_coco(root, image_set, transforms, mode='instances'):
-    anno_file_template = "{}_{}2017.json"
-    PATHS = {
-        "train": ("train2017", os.path.join("annotations", anno_file_template.format(mode, "train"))),
-        "val": ("val2017", os.path.join("annotations", anno_file_template.format(mode, "val"))),
-        # "train": ("val2017", os.path.join("annotations", anno_file_template.format(mode, "val")))
-    }
-
-    t = [ConvertCocoPolysToMask()]
-
-    if transforms is not None:
-        t.append(transforms)
-    transforms = T.Compose(t)
-
-    img_folder, ann_file = PATHS[image_set]
-    img_folder = os.path.join(root, img_folder)
-    ann_file = os.path.join(root, ann_file)
-
-    dataset = CocoDetection(img_folder, ann_file, transforms=transforms)
-
-    if image_set == "train":
-        dataset = _coco_remove_images_without_annotations(dataset)
-
-    # dataset = torch.utils.data.Subset(dataset, [i for i in range(500)])
-
-    return dataset
-
-
-def get_coco_kp(root, image_set, transforms):
-    return get_coco(root, image_set, transforms, mode="person_keypoints")

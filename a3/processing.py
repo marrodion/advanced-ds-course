@@ -1,8 +1,7 @@
 import torchvision.transforms as T
 
-def get_transform(train):
-    transforms = []
-    transforms.append(T.ToTensor())
+def get_transforms(train):
+    transforms = []    
     if train:
         transforms.append(T.RandomHorizontalFlip(0.5))
     return T.Compose(transforms)

@@ -23,7 +23,7 @@ LICENSES=[dict(id=0, name="", url="")]
 
 
 class SignsDataset(torch.utils.data.Dataset):
-    def __init__(self, img_root, ann_root, transforms):
+    def __init__(self, img_root, ann_root, transforms, keep_empty=False):
         self.img_root = img_root        
         self.transforms = transforms
         self.usecols = ['class', 'xtl', 'ytl', 'xbr', 'ybr']
@@ -31,10 +31,21 @@ class SignsDataset(torch.utils.data.Dataset):
         self.target = dict()
         annot = list(sorted(Path(ann_root).rglob('*.tsv')))
         classes = set()
+        empty_images = set()
         for ann, f in tqdm(zip(annot, self.imgs), total=len(annot)):
-            df = pd.read_csv(ann, sep='\t', usecols=self.usecols)
-            self.target[f] = df.values
+            df = pd.read_csv(ann, sep='\t', usecols=self.usecols, dtype={
+                'class': str,
+                'xtl': np.float32, 
+                'ytl': np.float32, 
+                'xbr': np.float32, 
+                'ybr': np.float32
+            }).fillna('NA')
+            if df.empty and not keep_empty:
+                empty_images.add(f)
+            else:
+                self.target[f] = df.values
             classes |= set(df['class'])
+        self.imgs = [f for f in self.imgs if f not in empty_images]
         self.idx2cls = dict(enumerate(classes))
         self.cls2idx = {v: k for k, v in self.idx2cls.items()}
         
@@ -44,14 +55,22 @@ class SignsDataset(torch.utils.data.Dataset):
         img = Image.open(f)
         target = {}
         trg = self.target[f]
-        cls = [self.cls2idx[c] for c in trg[:, 0]]
-        boxes = torch.tensor(list(row for row in trg[:, 1:]), dtype=torch.float32)
         num_objs = trg.shape[0]
+
+        cls = [self.cls2idx[c] for c in trg[:, 0]]
+        boxes = []
+        for i in range(num_objs):
+            boxes.append([trg[i, 1], trg[i, 2], trg[i, 3], trg[i, 4]]) 
+        boxes = torch.as_tensor(boxes, dtype=torch.float32)
+
+        area = torch.tensor([0])
+        if boxes.nelement() != 0:
+            area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])        
         
         target['boxes'] = boxes
-        target['labels'] = torch.tensor(cls, dtype=torch.int64).unsqueeze(1)
+        target['labels'] = torch.tensor(cls, dtype=torch.int64)
         target['image_id'] = torch.tensor([idx])
-        target['area'] = (trg[:, 4] - trg[:, 2]) * (trg[:, 3] - trg[:, 1])
+        target['area'] = area
         target['iscrowd'] = torch.zeros((num_objs,), dtype=torch.int64)
         
         if self.transforms is not None:
@@ -60,41 +79,6 @@ class SignsDataset(torch.utils.data.Dataset):
     
     def __len__(self):
         return len(self.imgs)
-
-
-def collate_func(batch):
-    imgs = []
-    bbox = []
-    labels = []
-    ids = []
-    areas = []
-    iscrowds = []
-    for b in batch:
-        imgs.append(b[0])
-        bbox.append(b[1]['boxes'])
-        labels.append(b[1]['labels'])        
-        ids.append(b[1]['image_id'])
-        areas.append(b[1]['area'])
-        iscrowds.append(b[1]['iscrowd'])
-    imgs = torch.stack(imgs, dim=0)
-    target = dict(
-        boxes=bbox,
-        labels=labels,
-        image_id=ids,
-        area=areas,
-        iscrowd=iscrowds
-    )
-    return imgs, target
-
-
-def get_data_loader(ds, batch_size, shuffle=True):
-    return torch.utils.data.DataLoader(ds, 
-                batch_size=batch_size, 
-                collate_fn=collate_func, 
-                pin_memory=True,
-                shuffle=shuffle
-    )
-
 
 def copy_images(img_path, out_path):
     files = list(Path(img_path).rglob('*.jpg'))
@@ -180,8 +164,18 @@ def annotations_to_coco(ann_path, img_path, out):
     with open(out, 'w+') as fh:
         json.dump(result, fh)
 
+
 def coco_collate_fn(batch):
     return tuple(zip(*batch))
+
+
+def get_data_loader(ds, batch_size, shuffle=True):
+    return torch.utils.data.DataLoader(ds, 
+                batch_size=batch_size, 
+                collate_fn=coco_collate_fn, 
+                pin_memory=True,
+                shuffle=shuffle
+    )
 
 if __name__ == 'main':
     annotations_to_coco('./data/annotations/train', './data/images/train', './data/coco_ds/train/annotations.json')

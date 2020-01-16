@@ -25,12 +25,12 @@ def draw_boxes(img, boxes, labels, ax=None):
 def plot_grid(batch, rows=2, cols=2):
     fig = plt.figure()
     grid = ImageGrid(fig, 111, nrows_ncols=(2, 2), axes_pad=0.1)
-    n = batch[0].shape[0]
+    n = len(batch[0])
     
     for i, ax in zip(range(n), grid):
-        img = batch[0][i, :, :].squeeze()
-        boxes = batch[1]['boxes'][i]
-        labels = batch[1]['labels'][i]
+        img = batch[0][i].squeeze()
+        boxes = batch[1][i]['boxes']
+        labels = batch[1][i]['labels']
         draw_boxes(img, boxes, labels, ax=ax)
     plt.axis('off')
     plt.show()
