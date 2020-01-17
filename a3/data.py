@@ -47,7 +47,6 @@ class_mapping = defaultdict(lambda: 'OTH')
 class_mapping.update(CLS_MAP)
     
 
-
 class SignsDataset(torch.utils.data.Dataset):
     def __init__(self, img_root, ann_root, transforms, keep_empty=False):
         self.img_root = img_root        
@@ -234,10 +233,6 @@ def create_tf_example(path, ann):
     filename = path.name # Filename of the image. Empty if image is not from file
     # encoded_image_data =  # Encoded image bytes
     image_format = path.suffix # b'jpeg' or b'png'
-
-
-
-
 
 
 if __name__ == 'main':

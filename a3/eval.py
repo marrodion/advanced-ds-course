@@ -1,55 +1,51 @@
 import torch
-from pycocotools.cocoeval import COCOeval
-from pycocotools.coco import COCO
-from tqdm import tqdm
-
-def evaluate(model, data_loader, device):
-    model.eval()
-    # coco api
+import torchvision
+from torch.utils.tensorboard import SummaryWriter
+from torchvision import datasets, transforms
+import numpy as np
 
 
-class CocoEvaluator():
-    pass
-
-def get_coco_api_from_dataset(dataset):
-    pass
-
-def convert_to_coco_api(ds):
-    coco_ds = COCO()
-    ann_id = 1
-    dataset = dict(images=[], categories=[], annotations=[])
-    categories = set()
-    for img_idx in tqdm(range(len(ds)), total=len(ds)):
-        img, targets = ds[img_idx]
-        image_id = targets["image_id"].item()
-        img_dict = {}
-        img_dict['id'] = image_id
-        img_dict['height'] = img.shape[-2]
-        img_dict['width'] = img.shape[-1]
-        dataset['images'].append(img_dict)
-        bboxes = targets["boxes"]
-        if bboxes.nelement() != 0:
-            bboxes[:, 2:] -= bboxes[:, :2]
-        bboxes = bboxes.tolist()
-        labels = targets['labels'].tolist()
-        areas = targets['area'].tolist()
-        iscrowd = targets['iscrowd'].tolist()
-        num_objs = len(bboxes)
-        for i in range(num_objs):
-            ann = {}
-            ann['image_id'] = image_id            
-            ann['bbox'] = bboxes[i]            
-            ann['category_id'] = labels[i]
-            categories.add(labels[i])
-            ann['area'] = areas[i]
-            ann['iscrowd'] = iscrowd[i]
-            ann['id'] = ann_id
-            dataset['annotations'].append(ann)
-            ann_id += 1
-    dataset['categories'] = [{'id': i} for i in sorted(categories)]
-    coco_ds.dataset = dataset
-    coco_ds.createIndex()
-    return coco_ds
+def get_tb_logger(logdir):
+    writer = SummaryWriter(log_dir=logdir)
+    return writer
 
 
+class EarlyStopping(object):
+    def __init__(self, mode='min', min_delta=0, patience=10):
+        self.mode = mode
+        self.min_delta = min_delta
+        self.patience = patience
+        self.best = None
+        self.num_bad_epochs = 0
+        self.is_better = None
+        self._init_is_better(mode, min_delta)
 
+        if patience == 0:
+            self.is_better = lambda a, b: True
+            self.step = lambda a: False
+
+    def step(self, metrics):
+        if self.best is None:
+            self.best = metrics
+            return False
+
+        if np.isnan(metrics):
+            return True
+
+        if self.is_better(metrics, self.best):
+            self.num_bad_epochs = 0
+            self.best = metrics
+        else:
+            self.num_bad_epochs += 1
+
+        if self.num_bad_epochs >= self.patience:
+            return True
+        return False
+
+    def _init_is_better(self, mode, min_delta):
+        if mode not in {'min', 'max'}:
+            raise ValueError('mode ' + mode + ' is unknown!')
+        if mode == 'min':
+            self.is_better = lambda a, best: a < best - min_delta
+        if mode == 'max':
+            self.is_better = lambda a, best: a > best + min_delta

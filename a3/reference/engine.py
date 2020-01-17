@@ -2,19 +2,25 @@ import math
 import sys
 import time
 import torch
+import logging
 
 import torchvision.models.detection.mask_rcnn
 
 from .coco_utils import get_coco_api_from_dataset
 from .coco_eval import CocoEvaluator
 from . import utils
+from ..eval import get_tb_logger, EarlyStopping
+
+logger = logging.getLogger(__name__)
 
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
+def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, logdir):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
+
+    tb_logger = get_tb_logger(logdir=logdir)
 
     lr_scheduler = None
     if epoch == 0:
@@ -22,7 +28,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
         warmup_iters = min(1000, len(data_loader) - 1)
 
         lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
-
+    i = epoch * len(data_loader.dataset)
     for images, targets in metric_logger.log_every(data_loader, print_freq, header):
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
@@ -38,8 +44,8 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
         loss_value = losses_reduced.item()
 
         if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
-            print(loss_dict_reduced)
+            logger.info("Loss is {}, stopping training".format(loss_value))
+            logger.info(loss_dict_reduced)
             sys.exit(1)
 
         optimizer.zero_grad()
@@ -51,6 +57,10 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
 
         metric_logger.update(loss=losses_reduced, **loss_dict_reduced)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+
+        float_metrics = {k: v.value for k, v in metric_logger.meters.items()}
+        tb_logger.add_scalars('Loss/train', float_metrics, i)
+        i += 1
 
 
 def _get_iou_types(model):
@@ -66,14 +76,15 @@ def _get_iou_types(model):
 
 
 @torch.no_grad()
-def evaluate(model, data_loader, device):
+def evaluate(model, data_loader, device, logdir, epoch):
     n_threads = torch.get_num_threads()
     # FIXME remove this and make paste_masks_in_image run on the GPU
     torch.set_num_threads(1)
     cpu_device = torch.device("cpu")
     model.eval()
-    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger = utils.MetricLogger(delimiter="  ")    
     header = 'Test:'
+    tb_logger = get_tb_logger(logdir=logdir)
 
     coco = get_coco_api_from_dataset(data_loader.dataset)
     iou_types = _get_iou_types(model)
@@ -98,11 +109,34 @@ def evaluate(model, data_loader, device):
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
+    logger.info("Averaged stats: %s", metric_logger)
     coco_evaluator.synchronize_between_processes()
 
     # accumulate predictions from all images
-    coco_evaluator.accumulate()
+    coco_evaluator.accumulate()    
     coco_evaluator.summarize()
+
+    stats = coco_evaluator.coco_eval['bbox'].stats
+    ap_stat_names = [
+        'AP@0.50:0.95@all',
+        'AP@0.50@all',
+        'AP@0.75@all',
+        'AP@0.50:0.95@small',
+        'AP@0.50:0.95@medium',
+        'AP@0.50:0.95@large',
+    ]
+    ar_stat_names = [
+        'AR@0.50:0.95@all',
+        'AR@0.50:0.95@all',
+        'AR@0.50:0.95@all',
+        'AR@0.50:0.95@small',
+        'AR@0.50:0.95@medium',
+        'AR@0.50:0.95@large',
+    ]
+    ap_eval_stats = dict(zip(ap_stat_names, stats[:5]))
+    ar_eval_stats = dict(zip(ar_stat_names, stats[5:]))
+    tb_logger.add_scalars('AP/test', ap_eval_stats, epoch)
+    tb_logger.add_scalars('AR/test', ar_eval_stats, epoch)
+
     torch.set_num_threads(n_threads)
     return coco_evaluator
