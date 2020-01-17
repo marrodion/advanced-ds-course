@@ -7,6 +7,7 @@ from PIL import Image
 import pandas as pd
 from pathlib import Path
 import torchvision
+from collections import defaultdict
 
 INFO=dict(
         year=2019,
@@ -18,8 +19,32 @@ INFO=dict(
 
 LICENSES=[dict(id=0, name="", url="")]
 
+CLS_MAP = {
+    '2.1': '2.1',
+    '2.4': '2.4',
+    '3.1': '3.1',
+    '3.24': '3.24',
+    '3.27': '3.27',
+    '4.1.1': '4.1',
+    '4.1.2': '4.1',
+    '4.1.3': '4.1',
+    '4.1.4': '4.1',
+    '4.1.5': '4.1',
+    '4.1.6': '4.1',
+    '4.2.1': '4.2',
+    '4.2.2': '4.2',
+    '4.2.3': '4.2',
+    '5.19.1': '5.19',
+    '5.19.2': '5.19',
+    '5.20': '5.20',
+    '8.22.1': '8.22',
+    '8.22.2': '8.22',
+    '8.22.3': '8.22'
+}
 
-
+class_mapping = defaultdict(lambda: 'OTH')
+class_mapping.update(CLS_MAP)
+    
 
 
 class SignsDataset(torch.utils.data.Dataset):
@@ -44,7 +69,7 @@ class SignsDataset(torch.utils.data.Dataset):
                 empty_images.add(f)
             else:
                 self.target[f] = df.values
-            classes |= set(df['class'])
+            classes |= set(df['class'].map(class_mapping))
         self.imgs = [f for f in self.imgs if f not in empty_images]
         self.idx2cls = dict(enumerate(classes))
         self.cls2idx = {v: k for k, v in self.idx2cls.items()}
