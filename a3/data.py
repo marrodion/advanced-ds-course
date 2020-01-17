@@ -8,6 +8,7 @@ import pandas as pd
 from pathlib import Path
 import torchvision
 from collections import defaultdict
+from skmultilearn.model_selection import IterativeStratification
 
 INFO=dict(
         year=2019,
@@ -72,7 +73,10 @@ class SignsDataset(torch.utils.data.Dataset):
             classes |= set(df['class'].map(class_mapping))
         self.imgs = [f for f in self.imgs if f not in empty_images]
         self.idx2cls = dict(enumerate(classes))
-        self.cls2idx = {v: k for k, v in self.idx2cls.items()}
+        ci = {v: k for k, v in self.idx2cls.items()}
+        cls2idx = defaultdict(lambda: ci['OTH'])
+        cls2idx.update(ci)
+        self.cls2idx = cls2idx
         
     
     def __getitem__(self, idx):
@@ -201,6 +205,40 @@ def get_data_loader(ds, batch_size, shuffle=True):
                 pin_memory=True,
                 shuffle=shuffle
     )
+
+
+def train_test_split(ds, stratify=True, test_size=0.2, order=5):
+    idx_class = np.zeros((len(ds), len(ds.cls2idx)))
+    for i, k in tqdm(enumerate(ds.imgs), total=len(ds)):
+        v = ds.target[k]
+        label_idx = np.array([ds.cls2idx[l] for l in v[:, 0]])
+        idx_class[i, label_idx] = 1
+    n_splits = int(1 / test_size)
+    itr = IterativeStratification(n_splits=n_splits, order=order)
+    train, test = itr.split(X=np.arange(idx_class.shape[0]), y=idx_class).__next__()
+    return train, test
+
+
+def to_tf_object_detection(ann_path, img_path, out):
+    ann_path = Path(ann_path)
+    img_path = Path(img_path)
+    
+    annot = list(sorted(ann_path.rglob('*.tsv')))
+    imgs = list(sorted(img_path.rglob('*.jpg')))
+    
+
+def create_tf_example(path, ann):
+    img = Image.open(path).convert('RGB')
+    height = img.height # Image height
+    width = img.width # Image width
+    filename = path.name # Filename of the image. Empty if image is not from file
+    # encoded_image_data =  # Encoded image bytes
+    image_format = path.suffix # b'jpeg' or b'png'
+
+
+
+
+
 
 if __name__ == 'main':
     annotations_to_coco('./data/annotations/train', './data/images/train', './data/coco_ds/train/annotations.json')
