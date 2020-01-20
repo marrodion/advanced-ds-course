@@ -4,6 +4,9 @@
 
 set -e
 
+TF_RESEARCH=/home/jovyan/work/ds-course-adv/cv/a3/models/research
+export PYTHONPATH=${PYTHONPATH}:${TF_RESEARCH}:${TF_RESEARCH}/slim
+
 wrapper=""
 if [[ "${RESTARTABLE}" == "yes" ]]; then
   wrapper="run-one-constantly"
