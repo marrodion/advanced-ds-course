@@ -5,11 +5,13 @@ import torch
 import logging
 
 import torchvision.models.detection.mask_rcnn
+from pathlib import Path
 
 from .coco_utils import get_coco_api_from_dataset
 from .coco_eval import CocoEvaluator
 from . import utils
 from ..eval import get_tb_logger, EarlyStopping
+
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, lo
         warmup_iters = min(1000, len(data_loader) - 1)
 
         lr_scheduler = utils.warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
-    i = epoch * len(data_loader)
+    i = (epoch + 1) * len(data_loader)
     for images, targets in metric_logger.log_every(data_loader, print_freq, header):
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
@@ -140,3 +142,98 @@ def evaluate(model, data_loader, device, logdir, epoch):
 
     torch.set_num_threads(n_threads)
     return coco_evaluator
+
+
+def get_model(pretrained, num_classes=11, pretrained_backbone=True):
+    return torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=pretrained, 
+                                                                num_classes=num_classes, 
+                                                                pretrained_backbone=pretrained_backbone)
+
+def get_optimizer(params):
+    return torch.optim.SGD(params, 
+                            lr=0.005,
+                            momentum=0.9, 
+                            weight_decay=0.0005)
+
+def get_lr_schedule(optimizer):
+    return torch.optim.lr_scheduler.StepLR(optimizer,
+                                    step_size=5,
+                                    gamma=0.1)
+
+
+class Experiment:
+
+    def __init__(self, name, model_factory, optimizer_factory, lr_scheduler_factory):
+        self.exp_name = name
+        self.checkpoint_dir = Path(f'./models/{name}/checkpoints')
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.best_model_fn = f'./models/{name}/best-ap-model.pt'
+        self.logdir = f'./logdir/{name}'        
+        self.model_factory = model_factory
+        self.optimizer_factory = optimizer_factory
+        self.lr_scheduler_factory = lr_scheduler_factory
+
+
+    def train(
+        self,
+        train_data_loader,
+        val_data_loader,        
+        num_epoch=100,
+        resume=True,
+        device=torch.device('cuda:0')        
+    ):
+        model = self.model_factory()
+        torch.cuda.empty_cache()
+        model.to(device)
+
+        params = [p for p in model.parameters() if p.requires_grad]
+        optimizer = self.optimizer_factory(params)
+        lr_scheduler = self.lr_scheduler_factory(optimizer)
+        es = EarlyStopping(mode='max', patience=5)
+
+        checkpoints = sorted(list(Path(self.checkpoint_dir).iterdir()))
+        epoch = 0
+        if checkpoints and resume:
+            logger.info("Loading from checkpoint")    
+            epoch, model, optimizer, lr_scheduler, _ = utils.load_checkpoint(checkpoints[-1], 
+                                                                    model=model, 
+                                                                    optimizer=optimizer, 
+                                                                    lr_scheduler=lr_scheduler)
+            assert lr_scheduler is not None
+            logger.info(f"Checkpoint loaded, resuming training from {epoch + 1} epoch")
+
+        try:
+            for epoch in range(epoch, num_epoch):
+                train_one_epoch(model, optimizer, train_data_loader, device, epoch, 20, self.logdir)
+                lr_scheduler.step()
+                # evaluate after every epoch
+                coco_evaluator = evaluate(model, val_data_loader, device=device, logdir=self.logdir, epoch=epoch)
+
+                stats = coco_evaluator.coco_eval['bbox'].stats
+                ap = stats[0]
+                prev_best = 0 if es.best is None else es.best
+                utils.save_checkpoint(
+                    state=dict(
+                        model=model.state_dict(),
+                        optimizer=optimizer.state_dict(),
+                        lr_scheduler=lr_scheduler.state_dict(),
+                        stats=stats,
+                        epoch=epoch
+                    ), 
+                    is_best=ap > prev_best,
+                    filename=f"{self.checkpoint_dir}/{epoch}.pt", 
+                    best_filename=self.best_model_fn
+                )
+                if es.step(ap):
+                    logger.info(f"Metric did not improve over {es.patience} epoch, stopping")
+                    break
+        except Exception as e:
+            raise
+        finally:
+            del model, optimizer, params, lr_scheduler, es 
+            del train_data_loader, val_data_loader
+            torch.cuda.empty_cache()
+
+
+    def evaluate(self):
+        pass

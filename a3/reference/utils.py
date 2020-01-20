@@ -11,6 +11,7 @@ import torch.distributed as dist
 import errno
 import os
 import logging
+import shutil
 
 logger = logging.getLogger(__name__)
 
