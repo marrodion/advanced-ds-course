@@ -9,6 +9,12 @@ from pathlib import Path
 import torchvision
 from collections import defaultdict
 from skmultilearn.model_selection import IterativeStratification
+import tensorflow as tf
+from object_detection.utils import dataset_util
+import contextlib2
+from object_detection.dataset_tools import tf_record_creation_util
+from object_detection.protos.string_int_label_map_pb2 import StringIntLabelMap, StringIntLabelMapItem
+from google.protobuf import text_format
 
 INFO=dict(
         year=2019,
@@ -58,18 +64,12 @@ class SignsDataset(torch.utils.data.Dataset):
         classes = set()
         empty_images = set()
         for ann, f in tqdm(zip(annot, self.imgs), total=len(annot)):
-            df = pd.read_csv(ann, sep='\t', usecols=self.usecols, dtype={
-                'class': str,
-                'xtl': np.float32, 
-                'ytl': np.float32, 
-                'xbr': np.float32, 
-                'ybr': np.float32
-            }).fillna('NA')
+            df = read_ann_df(ann)
             if df.empty and not keep_empty:
                 empty_images.add(f)
             else:
                 self.target[f] = df.values
-            classes |= set(df['class'].map(class_mapping))
+            classes |= set(df['class'])
         self.imgs = [f for f in self.imgs if f not in empty_images]
         self.idx2cls = dict(enumerate(classes))
         ci = {v: k for k, v in self.idx2cls.items()}
@@ -107,6 +107,19 @@ class SignsDataset(torch.utils.data.Dataset):
     
     def __len__(self):
         return len(self.imgs)
+
+
+def read_ann_df(path, usecols=('class', 'xtl', 'ytl', 'xbr', 'ybr')):
+    df = pd.read_csv(path, sep='\t', usecols=usecols, dtype={
+                'class': str,
+                'xtl': np.float32, 
+                'ytl': np.float32, 
+                'xbr': np.float32, 
+                'ybr': np.float32
+            }).fillna('NA')
+
+    df.loc[:, 'class'] = df.loc[:, 'class'].map(class_mapping)
+    return df
 
 def copy_images(img_path, out_path):
     files = list(Path(img_path).rglob('*.jpg'))
@@ -193,6 +206,25 @@ def annotations_to_coco(ann_path, img_path, out):
         json.dump(result, fh)
 
 
+def get_cls_mapping(annotations):
+    classes = set()
+    usecols = ['class', 'xtl', 'ytl', 'xbr', 'ybr']
+    for ann in tqdm(annotations, total=len(annotations), desc='Cls mapping parse'):
+        df = pd.read_csv(ann, sep='\t', usecols=usecols, dtype={
+            'class': str,
+            'xtl': np.float32, 
+            'ytl': np.float32, 
+            'xbr': np.float32, 
+            'ybr': np.float32
+        }).fillna('NA')
+        classes |= set(df['class'].map(class_mapping))
+    idx2cls = dict(enumerate(classes, 1))
+    ci = {v: k for k, v in idx2cls.items()}
+    cls2idx = defaultdict(lambda: ci['OTH'])
+    cls2idx.update(ci)
+    return idx2cls, cls2idx  
+
+
 def coco_collate_fn(batch):
     return tuple(zip(*batch))
 
@@ -212,27 +244,96 @@ def train_test_split(ds, stratify=True, test_size=0.2, order=5):
         v = ds.target[k]
         label_idx = np.array([ds.cls2idx[l] for l in v[:, 0]])
         idx_class[i, label_idx] = 1
+    return get_train_test_idx(idx_class, test_size, order=order)
+
+def get_train_test_idx(labels, test_size, order=5):
     n_splits = int(1 / test_size)
     itr = IterativeStratification(n_splits=n_splits, order=order)
-    train, test = itr.split(X=np.arange(idx_class.shape[0]), y=idx_class).__next__()
+    train, test = itr.split(X=np.arange(labels.shape[0]), y=labels).__next__()
     return train, test
 
 
-def to_tf_object_detection(ann_path, img_path, out):
+def create_tf_example(img_fn, ann_fn, cls2idx):
+    img = Image.open(img_fn).convert('RGB')
+    height = img.height # Image height
+    width = img.width # Image width
+    filename = bytes(img_fn) # Filename of the image. Empty if image is not from file
+    encoded_image_data = img.tobytes() # Encoded image bytes
+    image_format = bytes(img_fn.suffix, 'utf-8') # b'jpeg' or b'png'
+    
+    ann = pd.read_csv(ann_fn, 
+                      sep='\t', 
+                      usecols=['class', 'xtl', 'ytl', 'xbr', 'ybr'], 
+                      dtype={
+                        'class': str,
+                        'xtl': np.float32, 
+                        'ytl': np.float32, 
+                        'xbr': np.float32, 
+                        'ybr': np.float32
+                      }
+                ).fillna('NA')
+
+    xmins = ann['xtl'].values / width # List of normalized left x coordinates in bounding box (1 per box)
+    xmaxs = ann['xbr'].values / width # List of normalized right x coordinates in bounding box
+            # (1 per box)
+    ymins = ann['ytl'].values / height # List of normalized top y coordinates in bounding box (1 per box)
+    ymaxs = ann['ybr'].values / height # List of normalized bottom y coordinates in bounding box
+            # (1 per box)
+    classes_text = ann['class'].map(lambda x: bytes(x, 'utf-8')).tolist() # List of string class name of bounding box (1 per box)
+    classes = [cls2idx[c] for c in ann['class']] # List of integer class id of bounding box (1 per box)
+
+    tf_example = tf.train.Example(features=tf.train.Features(feature={
+        'image/height': dataset_util.int64_feature(height),
+        'image/width': dataset_util.int64_feature(width),
+        'image/filename': dataset_util.bytes_feature(filename),
+        'image/source_id': dataset_util.bytes_feature(filename),
+        'image/encoded': dataset_util.bytes_feature(encoded_image_data),
+        'image/format': dataset_util.bytes_feature(image_format),
+        'image/object/bbox/xmin': dataset_util.float_list_feature(xmins),
+        'image/object/bbox/xmax': dataset_util.float_list_feature(xmaxs),
+        'image/object/bbox/ymin': dataset_util.float_list_feature(ymins),
+        'image/object/bbox/ymax': dataset_util.float_list_feature(ymaxs),
+        'image/object/class/text': dataset_util.bytes_list_feature(classes_text),
+        'image/object/class/label': dataset_util.int64_list_feature(classes),
+    }))
+    return tf_example
+
+
+def to_tf_object_detection(ann_path, img_path, out, num_shards=100):
     ann_path = Path(ann_path)
     img_path = Path(img_path)
     
-    annot = list(sorted(ann_path.rglob('*.tsv')))
+    annot = list(sorted(ann_path.rglob('*.tsv')))    
     imgs = list(sorted(img_path.rglob('*.jpg')))
-    
+    to_tf_record(annot, imgs, out, num_shards=num_shards)
 
-def create_tf_example(path, ann):
-    img = Image.open(path).convert('RGB')
-    height = img.height # Image height
-    width = img.width # Image width
-    filename = path.name # Filename of the image. Empty if image is not from file
-    # encoded_image_data =  # Encoded image bytes
-    image_format = path.suffix # b'jpeg' or b'png'
+def to_tf_record(ann_files, img_files, out, cls2idx=None, num_shards=100):
+    if cls2idx is None:
+        _, cls2idx = get_cls_mapping(annot)
+    if num_shards == 1:
+        writer = tf.python_io.TFRecordWriter(out)
+        for img_fn, ann_fn in tqdm(zip(img_files, ann_files), total=len(img_files), desc='TFRecord write'):
+            tf_example = create_tf_example(img_fn, ann_fn, cls2idx)
+            writer.write(tf_example.SerializeToString())
+        writer.close()
+    else:
+        with contextlib2.ExitStack() as tf_record_close_stack:
+            output_tfrecords = tf_record_creation_util.open_sharded_output_tfrecords(
+            tf_record_close_stack, out, num_shards)
+            for index, (img_fn, ann_fn) in tqdm(enumerate(zip(img_files, ann_files)), 
+                                              total=len(img_files), 
+                                              desc='TFRecord write'):
+                tf_example = create_tf_example(img_fn, ann_fn, cls2idx)
+                output_shard_index = index % num_shards
+                output_tfrecords[output_shard_index].write(tf_example.SerializeToString())
+
+def write_label_map(idx2cls, out):
+    msg = StringIntLabelMap()
+    for i, name in idx2cls.items():
+        msg.item.append(StringIntLabelMapItem(id=i, name=name))
+    text = str(text_format.MessageToBytes(msg, as_utf8=True), 'utf-8')
+    with open(out, 'w+') as fh:
+        fh.write(text)        
 
 
 if __name__ == 'main':
