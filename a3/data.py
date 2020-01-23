@@ -15,6 +15,7 @@ import contextlib2
 from object_detection.dataset_tools import tf_record_creation_util
 from object_detection.protos.string_int_label_map_pb2 import StringIntLabelMap, StringIntLabelMapItem
 from google.protobuf import text_format
+import io
 
 INFO=dict(
         year=2019,
@@ -129,12 +130,13 @@ def copy_images(img_path, out_path):
         shutil.copy(f, dest)
 
 
-def annotations_to_coco(ann_path, img_path, out):
-    ann_path = Path(ann_path)
-    img_path = Path(img_path)
-    
-    annot = list(sorted(ann_path.rglob('*.tsv')))
-    imgs = list(sorted(img_path.rglob('*.jpg')))
+def annotations_to_coco(out, annot=None, imgs=None, ann_path=None, img_path=None):
+    if annot is None:
+        ann_path = Path(ann_path)    
+        annot = list(sorted(ann_path.rglob('*.tsv')))
+    if imgs is None:
+        img_path = Path(img_path)
+        imgs = list(sorted(img_path.rglob('*.jpg')))
 
     dfs = []
     images = []
@@ -151,21 +153,12 @@ def annotations_to_coco(ann_path, img_path, out):
             coco_url="",
             date_captured="2019-01-01"
         ))
-        
-        
-        df = pd.read_csv(ann, sep='\t', usecols=['class', 'xtl', 'ytl', 'xbr', 'ybr'], 
-        dtype={
-            'class': str,
-            'xtl': np.float32, 
-            'ytl': np.float32, 
-            'xbr': np.float32, 
-            'ybr': np.float32
-        })
+        df = read_ann_df(ann)
         df['image_id'] = img_id
         dfs.append(df)
     df = pd.concat(dfs, axis=0)
     
-    cat_ids, idx2cat = pd.factorize(df['class'].fillna('NA'))
+    cat_ids, idx2cat = pd.factorize(df['class'])
     df['category_id'] = cat_ids
     categories = []
     for i, cat in enumerate(idx2cat):
@@ -174,7 +167,6 @@ def annotations_to_coco(ann_path, img_path, out):
             name=cat,
             supercategory=cat
         ))
-
     annotations = []
 
     for i, row in enumerate(df.itertuples()):
@@ -243,13 +235,14 @@ def train_test_split(ds, stratify=True, test_size=0.2, order=5):
     for i, k in tqdm(enumerate(ds.imgs), total=len(ds)):
         v = ds.target[k]
         label_idx = np.array([ds.cls2idx[l] for l in v[:, 0]])
-        idx_class[i, label_idx] = 1
+        idx_class[i, label_idx] = 1    
     return get_train_test_idx(idx_class, test_size, order=order)
 
+
 def get_train_test_idx(labels, test_size, order=5):
-    n_splits = int(1 / test_size)
-    itr = IterativeStratification(n_splits=n_splits, order=order)
-    train, test = itr.split(X=np.arange(labels.shape[0]), y=labels).__next__()
+    itr = IterativeStratification(n_splits=2, order=order, 
+                                  sample_distribution_per_fold=[test_size, 1.0-test_size])
+    train, test = next(itr.split(X=np.arange(labels.shape[0]), y=labels))
     return train, test
 
 
@@ -258,7 +251,12 @@ def create_tf_example(img_fn, ann_fn, cls2idx):
     height = img.height # Image height
     width = img.width # Image width
     filename = bytes(img_fn) # Filename of the image. Empty if image is not from file
-    encoded_image_data = img.tobytes() # Encoded image bytes
+    
+    with io.BytesIO() as output:
+        img.save(output, format="JPEG")
+        contents = output.getvalue()
+    encoded_image_data = contents # Encoded image bytes
+
     image_format = bytes(img_fn.suffix, 'utf-8') # b'jpeg' or b'png'
     
     ann = pd.read_csv(ann_fn, 
@@ -307,6 +305,7 @@ def to_tf_object_detection(ann_path, img_path, out, num_shards=100):
     imgs = list(sorted(img_path.rglob('*.jpg')))
     to_tf_record(annot, imgs, out, num_shards=num_shards)
 
+
 def to_tf_record(ann_files, img_files, out, cls2idx=None, num_shards=100):
     if cls2idx is None:
         _, cls2idx = get_cls_mapping(annot)
@@ -327,13 +326,14 @@ def to_tf_record(ann_files, img_files, out, cls2idx=None, num_shards=100):
                 output_shard_index = index % num_shards
                 output_tfrecords[output_shard_index].write(tf_example.SerializeToString())
 
+
 def write_label_map(idx2cls, out):
     msg = StringIntLabelMap()
     for i, name in idx2cls.items():
         msg.item.append(StringIntLabelMapItem(id=i, name=name))
     text = str(text_format.MessageToBytes(msg, as_utf8=True), 'utf-8')
     with open(out, 'w+') as fh:
-        fh.write(text)        
+        fh.write(text)
 
 
 if __name__ == 'main':

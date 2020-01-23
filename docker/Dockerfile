@@ -1,4 +1,4 @@
-FROM nvidia/cuda:9.2-cudnn7-runtime-ubuntu16.04
+FROM nvidia/cuda:10.0-cudnn7-devel-ubuntu16.04
 
 ARG NB_USER="jovyan"
 ARG NB_UID="1023"
@@ -9,8 +9,8 @@ USER root
 # Install all OS dependencies for notebook server that starts but lacks all
 # features (e.g., download as all possible file formats)
 ENV DEBIAN_FRONTEND noninteractive
-RUN apt-get update \
- && apt-get install -yq --no-install-recommends \
+RUN apt-get update && \
+    apt-get install -yq --no-install-recommends \
     wget \
     bzip2 \
     ca-certificates \
@@ -23,6 +23,7 @@ RUN apt-get update \
     git \
     inkscape \
     jed \
+    libglib2.0-0 \
     libsm6 \
     libxext-dev \
     libxrender1 \
@@ -39,7 +40,8 @@ RUN apt-get update \
     tzdata \
     unzip \
     nano \
- && apt-get clean && rm -rf /var/lib/apt/lists/*
+    protobuf-compiler && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
     locale-gen
@@ -107,19 +109,59 @@ RUN cd /tmp && \
     conda install --quiet --yes 'tini=0.18.0' && \
     conda list tini | grep tini | tr -s ' ' | cut -d ' ' -f 1,2 >> $CONDA_DIR/conda-meta/pinned && \
     conda clean --all -f -y && \
-    conda install --quiet --yes \
+    conda install --quiet --yes -c pytorch -c conda-forge  \
     'notebook=6.0.0' \
     'jupyterhub=1.0.0' \
-    'jupyterlab=1.2.1' && \
+    'jupyterlab=1.2.1' \
+    'cython' \
+    'accimage' \
+    'pytorch=1.2.0' \
+    'torchvision==0.4.0' \
+    'cudatoolkit=10.0' \
+    'pandas' \
+    'numpy' \
+    'tqdm' \
+    'matplotlib' \
+    'scikit-learn' && \
     # Install PyTorch
-    conda install pytorch torchvision cudatoolkit=9.2 -c pytorch && \
+    pip install \
+    future \
+    albumentations \    
+    scikit-multilearn \
+    tensorflow==1.15.0 \
+    contextlib2 \
+    lxml \
+    jupyter_contrib_nbextensions \
+    jupyter_nbextensions_configurator \
+    mmcv && \
+    fix-permissions $CONDA_DIR && \
+    fix-permissions /home/$NB_USER
+	
+# Update Pillow and clean up
+RUN pip uninstall --yes pillow && \
+    CC="cc -mavx2" pip install -U --force-reinstall pillow-simd==6.2.2.post1 && \
     conda clean --all -f -y && \
     npm cache clean --force && \
     jupyter notebook --generate-config && \
+    jupyter contrib nbextension install --user && \
+    jupyter nbextension enable toc2/main && \
     rm -rf $CONDA_DIR/share/jupyter/lab/staging && \
     rm -rf /home/$NB_USER/.cache/yarn && \
     fix-permissions $CONDA_DIR && \
     fix-permissions /home/$NB_USER
+
+# Install tensorflow object detection API
+RUN git clone https://github.com/tensorflow/models.git /home/jovyan/tf/models && \
+    git clone https://github.com/cocodataset/cocoapi.git && \
+    cd cocoapi/PythonAPI && \
+    make && \
+    cp -r pycocotools /home/jovyan/tf/models/research/ && \
+    cd /home/jovyan/tf/models/research/ && \
+    wget -O protobuf.zip https://github.com/google/protobuf/releases/download/v3.0.0/protoc-3.0.0-linux-x86_64.zip && \
+    unzip protobuf.zip && \
+    ./bin/protoc object_detection/protos/*.proto --python_out=.
+
+ENV PYTHONPATH=$PYTHONPATH:/home/jovyan/tf/models/research:/home/jovyan/tf/models/research/slim
 
 EXPOSE 8888
 

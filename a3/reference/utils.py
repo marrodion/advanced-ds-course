@@ -24,11 +24,13 @@ def save_checkpoint(state, is_best, filename, best_filename):
         shutil.copyfile(filename, best_filename)
 
 
-def load_checkpoint(filename, model, optimizer, lr_scheduler = None):
+def load_checkpoint(filename, model, optimizer, lr_scheduler = None, eval_only=False):
     checkpoint = torch.load(filename)
     epoch = checkpoint['epoch']
     stats = checkpoint['stats']
     model.load_state_dict(checkpoint['model'])
+    if eval_only:
+        return epoch, model, None, None, stats
     optimizer.load_state_dict(checkpoint['optimizer'])
     if lr_scheduler is not None:
         lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])

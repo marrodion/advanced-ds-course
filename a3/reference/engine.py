@@ -86,7 +86,8 @@ def evaluate(model, data_loader, device, logdir, epoch):
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")    
     header = 'Test:'
-    tb_logger = get_tb_logger(logdir=logdir)
+    if logdir is not None:
+        tb_logger = get_tb_logger(logdir=logdir)
 
     coco = get_coco_api_from_dataset(data_loader.dataset)
     iou_types = _get_iou_types(model)
@@ -118,27 +119,28 @@ def evaluate(model, data_loader, device, logdir, epoch):
     coco_evaluator.accumulate()    
     coco_evaluator.summarize()
 
-    stats = coco_evaluator.coco_eval['bbox'].stats
-    ap_stat_names = [
-        'AP@0.50:0.95@all',
-        'AP@0.50@all',
-        'AP@0.75@all',
-        'AP@0.50:0.95@small',
-        'AP@0.50:0.95@medium',
-        'AP@0.50:0.95@large',
-    ]
-    ar_stat_names = [
-        'AR@0.50:0.95@all',
-        'AR@0.50:0.95@all',
-        'AR@0.50:0.95@all',
-        'AR@0.50:0.95@small',
-        'AR@0.50:0.95@medium',
-        'AR@0.50:0.95@large',
-    ]
-    ap_eval_stats = dict(zip(ap_stat_names, stats[:5]))
-    ar_eval_stats = dict(zip(ar_stat_names, stats[5:]))
-    tb_logger.add_scalars('AP/test', ap_eval_stats, epoch)
-    tb_logger.add_scalars('AR/test', ar_eval_stats, epoch)
+    if logdir is not None:
+        stats = coco_evaluator.coco_eval['bbox'].stats
+        ap_stat_names = [
+            'AP@0.50:0.95@all',
+            'AP@0.50@all',
+            'AP@0.75@all',
+            'AP@0.50:0.95@small',
+            'AP@0.50:0.95@medium',
+            'AP@0.50:0.95@large',
+        ]
+        ar_stat_names = [
+            'AR@0.50:0.95@all',
+            'AR@0.50:0.95@all',
+            'AR@0.50:0.95@all',
+            'AR@0.50:0.95@small',
+            'AR@0.50:0.95@medium',
+            'AR@0.50:0.95@large',
+        ]
+        ap_eval_stats = dict(zip(ap_stat_names, stats[:5]))
+        ar_eval_stats = dict(zip(ar_stat_names, stats[5:]))
+        tb_logger.add_scalars('AP/test', ap_eval_stats, epoch)
+        tb_logger.add_scalars('AR/test', ar_eval_stats, epoch)
 
     torch.set_num_threads(n_threads)
     return coco_evaluator
@@ -235,5 +237,22 @@ class Experiment:
             torch.cuda.empty_cache()
 
 
-    def evaluate(self):
-        pass
+    def evaluate(self, val_data_loader, device):
+        model = self.model_factory()
+        torch.cuda.empty_cache()
+        params = [p for p in model.parameters() if p.requires_grad]
+        optimizer = self.optimizer_factory(params)
+        lr_scheduler = self.lr_scheduler_factory(optimizer)
+        epoch, model, _, _, stats = utils.load_checkpoint(self.best_model_fn, 
+                                                model, 
+                                                optimizer, 
+                                                lr_scheduler, 
+                                                eval_only=True)
+        model.eval()
+        model.to(device)
+
+        logger.info("Loaded model for evaluation from {self.best_model_fn}")
+        logger.info("Evaluation stats of the model: {stats}")
+        coco_evaluator = evaluate(model, val_data_loader, device=device, logdir=None, epoch=epoch)
+        return coco_evaluator
+
