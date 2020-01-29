@@ -244,15 +244,15 @@ class Experiment:
         optimizer = self.optimizer_factory(params)
         lr_scheduler = self.lr_scheduler_factory(optimizer)
         epoch, model, _, _, stats = utils.load_checkpoint(self.best_model_fn, 
-                                                model, 
-                                                optimizer, 
-                                                lr_scheduler, 
-                                                eval_only=True)
+                                                          model, 
+                                                          optimizer, 
+                                                          lr_scheduler, 
+                                                          eval_only=True)
         model.eval()
         model.to(device)
 
-        logger.info("Loaded model for evaluation from {self.best_model_fn}")
-        logger.info("Evaluation stats of the model: {stats}")
+        logger.info(f"Loaded model for evaluation from {self.best_model_fn}")
+        logger.info(f"Evaluation stats of the model: {stats}")
         coco_evaluator = evaluate(model, val_data_loader, device=device, logdir=None, epoch=epoch)
         return coco_evaluator
 

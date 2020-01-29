@@ -17,15 +17,16 @@ from object_detection.protos.string_int_label_map_pb2 import StringIntLabelMap, 
 from google.protobuf import text_format
 import io
 
-INFO=dict(
+INFO = dict(
         year=2019,
         version="1.0",
         description="Signs dataset",
         contributor="",
         url="",
         date_created="2019/01/01")
+SEED = 42
 
-LICENSES=[dict(id=0, name="", url="")]
+LICENSES = [dict(id=0, name="", url="")]
 
 CLS_MAP = {
     '2.1': '2.1',
@@ -147,7 +148,7 @@ def annotations_to_coco(out, annot=None, imgs=None, ann_path=None, img_path=None
             id=img_id,
             width=img.width,
             height=img.height,
-            file_name=str(f.parts[-1]),
+            file_name=f"{f.parts[-2]}_{f.name}",
             license=0,
             flickr_url="",
             coco_url="",
@@ -169,7 +170,7 @@ def annotations_to_coco(out, annot=None, imgs=None, ann_path=None, img_path=None
         ))
     annotations = []
 
-    for i, row in enumerate(df.itertuples()):
+    for i, row in enumerate(df.itertuples(), 1):
         bbox = [
             row.xtl,
             row.ytl,
@@ -180,12 +181,13 @@ def annotations_to_coco(out, annot=None, imgs=None, ann_path=None, img_path=None
             raise Exception()
         area = bbox[-1] * bbox[-2]
         annotations.append(dict(
-            id=i+1,
+            id=i,
             image_id=row.image_id,
             category_id=row.category_id,
             area=area,
             bbox=bbox,
-            iscrowd=0        
+            iscrowd=0,
+            segmentation=[]        
         ))
     result = dict(
         info=INFO,
@@ -240,7 +242,7 @@ def train_test_split(ds, stratify=True, test_size=0.2, order=5):
 
 
 def get_train_test_idx(labels, test_size, order=5):
-    itr = IterativeStratification(n_splits=2, order=order, 
+    itr = IterativeStratification(n_splits=2, order=order, random_state=SEED,
                                   sample_distribution_per_fold=[test_size, 1.0-test_size])
     train, test = next(itr.split(X=np.arange(labels.shape[0]), y=labels))
     return train, test
