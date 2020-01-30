@@ -2,7 +2,7 @@ import torch
 import json
 import shutil
 import numpy as np
-from tqdm import tqdm
+from tqdm.autonotebook import tqdm
 from PIL import Image
 import pandas as pd
 from pathlib import Path
@@ -65,7 +65,9 @@ class SignsDataset(torch.utils.data.Dataset):
         annot = list(sorted(Path(ann_root).rglob('*.tsv')))
         classes = set()
         empty_images = set()
-        for ann, f in tqdm(zip(annot, self.imgs), total=len(annot)):
+        for ann, f in tqdm(zip(annot, self.imgs), 
+                           total=len(annot),
+                           desc='Reading annotations'):
             df = read_ann_df(ann)
             if df.empty and not keep_empty:
                 empty_images.add(f)
@@ -123,15 +125,17 @@ def read_ann_df(path, usecols=('class', 'xtl', 'ytl', 'xbr', 'ybr')):
     df.loc[:, 'class'] = df.loc[:, 'class'].map(class_mapping)
     return df
 
-def copy_images(img_path, out_path):
-    files = list(Path(img_path).rglob('*.jpg'))
+def copy_images(out_path, img_path=None, imgs=None):
+    if imgs is None:
+        imgs = list(Path(img_path).rglob('*.jpg'))
     dest_base = Path(out_path)
-    for f in tqdm(files):
+    for f in tqdm(imgs, desc='Copy images'):
         dest = dest_base / f"{f.parts[-2]}_{f.name}"
         shutil.copy(f, dest)
 
 
-def annotations_to_coco(out, annot=None, imgs=None, ann_path=None, img_path=None):
+def annotations_to_coco(out, cls2idx, annot=None, imgs=None, ann_path=None, 
+                        img_path=None):
     if annot is None:
         ann_path = Path(ann_path)    
         annot = list(sorted(ann_path.rglob('*.tsv')))
@@ -142,7 +146,8 @@ def annotations_to_coco(out, annot=None, imgs=None, ann_path=None, img_path=None
     dfs = []
     images = []
     # Coco ann should start from 1
-    for ann, f, img_id in tqdm(zip(annot, imgs, range(len(annot))), total=len(annot)):
+    for ann, f, img_id in tqdm(zip(annot, imgs, range(len(annot))), 
+                               total=len(annot), desc=f'Annotations for {Path(out).name}'):
         img = Image.open(f).convert('RGB')
         images.append(dict(
             id=img_id,
@@ -156,20 +161,21 @@ def annotations_to_coco(out, annot=None, imgs=None, ann_path=None, img_path=None
         ))
         df = read_ann_df(ann)
         df['image_id'] = img_id
+        df = df.loc[df['class'].isin(cls2idx.keys()), :]
         dfs.append(df)
     df = pd.concat(dfs, axis=0)
     
     cat_ids, idx2cat = pd.factorize(df['class'])
-    df['category_id'] = cat_ids
+    df['category_id'] = df['class'].map(cls2idx)
     categories = []
-    for i, cat in enumerate(idx2cat):
+    for cat, i in cls2idx.items():
         categories.append(dict(
             id=i,
             name=cat,
-            supercategory=cat
+            supercategory=class_mapping.get(cat, cat)
         ))
+    
     annotations = []
-
     for i, row in enumerate(df.itertuples(), 1):
         bbox = [
             row.xtl,
@@ -200,22 +206,21 @@ def annotations_to_coco(out, annot=None, imgs=None, ann_path=None, img_path=None
         json.dump(result, fh)
 
 
-def get_cls_mapping(annotations):
+def get_cls_mapping(annotations, with_other=True):
     classes = set()
     usecols = ['class', 'xtl', 'ytl', 'xbr', 'ybr']
     for ann in tqdm(annotations, total=len(annotations), desc='Cls mapping parse'):
-        df = pd.read_csv(ann, sep='\t', usecols=usecols, dtype={
-            'class': str,
-            'xtl': np.float32, 
-            'ytl': np.float32, 
-            'xbr': np.float32, 
-            'ybr': np.float32
-        }).fillna('NA')
-        classes |= set(df['class'].map(class_mapping))
+        df = read_ann_df(ann)
+        classes |= set(df['class'])
+    if not with_other:
+        classes.discard('OTH')
     idx2cls = dict(enumerate(classes, 1))
     ci = {v: k for k, v in idx2cls.items()}
-    cls2idx = defaultdict(lambda: ci['OTH'])
-    cls2idx.update(ci)
+    if with_other:
+        cls2idx = defaultdict(lambda: ci['OTH'])
+        cls2idx.update(ci)
+    else:
+        cls2idx = ci    
     return idx2cls, cls2idx  
 
 
@@ -234,7 +239,7 @@ def get_data_loader(ds, batch_size, shuffle=True):
 
 def train_test_split(ds, stratify=True, test_size=0.2, order=5):
     idx_class = np.zeros((len(ds), len(ds.cls2idx)))
-    for i, k in tqdm(enumerate(ds.imgs), total=len(ds)):
+    for i, k in tqdm(enumerate(ds.imgs), total=len(ds), desc='idx2label matrix'):
         v = ds.target[k]
         label_idx = np.array([ds.cls2idx[l] for l in v[:, 0]])
         idx_class[i, label_idx] = 1    
@@ -313,7 +318,9 @@ def to_tf_record(ann_files, img_files, out, cls2idx=None, num_shards=100):
         _, cls2idx = get_cls_mapping(annot)
     if num_shards == 1:
         writer = tf.python_io.TFRecordWriter(out)
-        for img_fn, ann_fn in tqdm(zip(img_files, ann_files), total=len(img_files), desc='TFRecord write'):
+        for img_fn, ann_fn in tqdm(zip(img_files, ann_files), 
+                                   total=len(img_files), 
+                                   desc='TFRecord write'):
             tf_example = create_tf_example(img_fn, ann_fn, cls2idx)
             writer.write(tf_example.SerializeToString())
         writer.close()
